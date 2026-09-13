@@ -1,0 +1,6 @@
+{
+  "name": "Blockverse",
+  "description": "AAA quality 10x10 block placement puzzle game with combos, overdrive mode, special blocks, rich VFX and multiple game modes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
