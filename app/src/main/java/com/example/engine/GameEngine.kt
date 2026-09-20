@@ -105,7 +105,34 @@ class GameEngine(
         replenishPieces()
     }
 
-    private fun replenishPieces() {
+    fun revive(): List<Pair<Int, Int>> {
+        isGameOver = false
+        val cleared = mutableListOf<Pair<Int, Int>>()
+        // Clear 4x4 center area (rows 3..6, cols 3..6)
+        for (r in 3..6) {
+            for (c in 3..6) {
+                if (grid[r][c].filled) {
+                    grid[r][c] = BoardCell(filled = false)
+                    cleared.add(Pair(r, c))
+                }
+            }
+        }
+        if (cleared.size < 4) {
+            for (r in 4..5) {
+                for (c in 0 until BOARD_SIZE) {
+                    if (grid[r][c].filled) {
+                        grid[r][c] = BoardCell(filled = false)
+                        cleared.add(Pair(r, c))
+                    }
+                }
+            }
+        }
+        replenishPieces()
+        isGameOver = false
+        return cleared
+    }
+
+    fun replenishPieces() {
         val trio = PieceFactory.generatePieceTrio(allowSpecial = mode != GameMode.ZEN)
         availablePieces[0] = trio[0]
         availablePieces[1] = trio[1]

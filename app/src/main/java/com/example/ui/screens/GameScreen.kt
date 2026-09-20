@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Lightbulb
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,8 +55,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import com.example.ads.AdsManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -359,9 +365,23 @@ fun GameScreen(viewModel: GameViewModel) {
             )
         }
 
-        // --- GAME OVER DIALOG ---
-        if (uiState.isGameOver) {
+        // --- SECOND CHANCE (REWARDED AD REVIVE) DIALOG ---
+        if (uiState.isGameOver && uiState.showSecondChanceDialog) {
+            SecondChanceReviveDialog(
+                viewModel = viewModel,
+                uiState = uiState
+            )
+        } else if (uiState.isGameOver) {
+            // --- GAME OVER SUMMARY (WITH 2X COIN REWARDED AD) ---
             GameOverDialog(
+                viewModel = viewModel,
+                uiState = uiState
+            )
+        }
+
+        // --- VICTORY DIALOG (WITH INTERSTITIAL AD ON ADVANCE) ---
+        if (uiState.isGameWon) {
+            VictoryDialog(
                 viewModel = viewModel,
                 uiState = uiState
             )
@@ -806,6 +826,7 @@ fun GameOverDialog(
     viewModel: GameViewModel,
     uiState: com.example.ui.GameUiState
 ) {
+    val context = LocalContext.current
     Dialog(onDismissRequest = {}) {
         Card(
             shape = RoundedCornerShape(24.dp),
@@ -868,10 +889,48 @@ fun GameOverDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Rewarded Ad 2X Coin & XP Multiplier
+                if (!uiState.rewardsDoubled) {
+                    Button(
+                        onClick = {
+                            val activity = context as? Activity
+                            if (activity != null) {
+                                AdsManager.showRewarded(
+                                    activity = activity,
+                                    onUserEarnedReward = { viewModel.doubleCoinsReward() },
+                                    onAdClosed = {}
+                                )
+                            } else {
+                                viewModel.doubleCoinsReward()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("rewarded_ad_double_button"),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Watch Ad", tint = Color.Black)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("2X REWARDS (WATCH AD)", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else {
+                    Text("✅ 2X BONUS COINS APPLIED!", color = Color(0xFF06D6A0), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 Button(
-                    onClick = { viewModel.restartGame() },
+                    onClick = {
+                        val activity = context as? Activity
+                        if (uiState.isNewHighScore && activity != null) {
+                            AdsManager.showInterstitial(activity) { viewModel.restartGame() }
+                        } else {
+                            viewModel.restartGame()
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F0FF)),
                     modifier = Modifier.fillMaxWidth().testTag("game_over_retry_button"),
                     shape = RoundedCornerShape(14.dp)
@@ -898,13 +957,275 @@ fun GameOverDialog(
                     Spacer(modifier = Modifier.width(10.dp))
 
                     Button(
-                        onClick = { viewModel.quitToHome() },
+                        onClick = {
+                            val activity = context as? Activity
+                            if (uiState.isNewHighScore && activity != null) {
+                                AdsManager.showInterstitial(activity) { viewModel.quitToHome() }
+                            } else {
+                                viewModel.quitToHome()
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f)),
                         modifier = Modifier.weight(1f).testTag("game_over_home_button"),
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Text("MENU", color = Color.White, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Rewarded Ad Revive Modal:
+ * Triggered on loss/game over. Gives player a Second Chance by clearing center blocks
+ * and refilling pieces so they continue their high score run.
+ */
+@Composable
+fun SecondChanceReviveDialog(
+    viewModel: GameViewModel,
+    uiState: com.example.ui.GameUiState
+) {
+    val context = LocalContext.current
+
+    Dialog(onDismissRequest = {}) {
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, Color(0xFF00F0FF).copy(alpha = 0.8f), RoundedCornerShape(24.dp))
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(Color(0xFF00F0FF).copy(alpha = 0.15f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = "Second Chance",
+                        tint = Color(0xFF00F0FF),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "SECOND CHANCE!",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Out of moves! Watch a short video ad to clear center blocks and keep your score of ${uiState.score} going!",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Score Display
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("SAVED SCORE: ", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                        Text("${uiState.score}", color = Color(0xFF00F0FF), fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Watch Rewarded Ad to Revive
+                Button(
+                    onClick = {
+                        val activity = context as? Activity
+                        if (activity != null) {
+                            AdsManager.showRewarded(
+                                activity = activity,
+                                onUserEarnedReward = { viewModel.reviveGame() },
+                                onAdClosed = {}
+                            )
+                        } else {
+                            viewModel.reviveGame()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF06D6A0)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("revive_watch_ad_button"),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Watch Ad", tint = Color.Black)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("REVIVE (WATCH AD)", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TextButton(
+                    onClick = { viewModel.dismissSecondChance() },
+                    modifier = Modifier.testTag("revive_skip_button")
+                ) {
+                    Text("No Thanks, End Game", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Victory Modal:
+ * Triggered on winning a puzzle sector or defeating AI.
+ * Shows Interstitial Ad upon advancing or continuing.
+ */
+@Composable
+fun VictoryDialog(
+    viewModel: GameViewModel,
+    uiState: com.example.ui.GameUiState
+) {
+    val context = LocalContext.current
+    val level = uiState.wonChallengeLevel
+
+    Dialog(onDismissRequest = {}) {
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(2.dp, Color(0xFFFFD700).copy(alpha = 0.8f), RoundedCornerShape(24.dp))
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(Color(0xFFFFD700).copy(alpha = 0.15f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.EmojiEvents,
+                        contentDescription = "Victory",
+                        tint = Color(0xFFFFD700),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (level != null) "SECTOR #${level.levelNumber} CLEARED!" else "VICTORY! YOU WON!",
+                    color = Color(0xFFFFD700),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 3 Stars Row
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (s in 1..3) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "Star",
+                            tint = if (s <= uiState.wonStars) Color(0xFFFFD700) else Color.White.copy(alpha = 0.2f),
+                            modifier = Modifier
+                                .size(34.dp)
+                                .padding(horizontal = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("COINS", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                        Text("+${uiState.earnedCoins}", color = Color(0xFF06D6A0), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("XP", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                        Text("+${uiState.earnedXp}", color = Color(0xFF00F0FF), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Next Level Button (Triggers Interstitial Ad on Victory!)
+                if (level != null && level.levelNumber < 30) {
+                    Button(
+                        onClick = {
+                            val activity = context as? Activity
+                            if (activity != null) {
+                                AdsManager.showInterstitial(activity) {
+                                    viewModel.onVictoryProceed(nextLevel = true)
+                                }
+                            } else {
+                                viewModel.onVictoryProceed(nextLevel = true)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF06D6A0)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("victory_next_level_button"),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("NEXT SECTOR", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next", tint = Color.Black)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                // Continue Button (Also respects Interstitial Ad)
+                OutlinedButton(
+                    onClick = {
+                        val activity = context as? Activity
+                        if (activity != null) {
+                            AdsManager.showInterstitial(activity) {
+                                viewModel.onVictoryProceed(nextLevel = false)
+                            }
+                        } else {
+                            viewModel.onVictoryProceed(nextLevel = false)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("victory_continue_button"),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("CONTINUE", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }

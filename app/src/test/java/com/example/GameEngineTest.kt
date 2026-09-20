@@ -113,4 +113,27 @@ class GameEngineTest {
         assertTrue(row in 0..9)
         assertTrue(col in 0..9)
     }
+
+    @Test
+    fun testReviveMechanic() {
+        val dot = GamePiece(id = "d", shape = arrayOf(intArrayOf(1)), colorIndex = 0)
+        // Fill center cells (rows 3..6, cols 3..6)
+        for (r in 3..6) {
+            for (c in 3..6) {
+                engine.availablePieces[0] = dot
+                engine.placePiece(0, r, c)
+            }
+        }
+        // Call revive
+        val cleared = engine.revive()
+        assertTrue(cleared.isNotEmpty())
+        assertFalse(engine.isGameOver)
+        assertEquals(3, engine.availablePieces.filterNotNull().size)
+        // Verify center cells cleared
+        for (r in 3..6) {
+            for (c in 3..6) {
+                assertFalse(engine.grid[r][c].filled)
+            }
+        }
+    }
 }

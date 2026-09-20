@@ -83,7 +83,14 @@ data class GameUiState(
     val challenges: List<ChallengeLevel> = emptyList(),
     val achievements: List<Achievement> = emptyList(),
     val dailyRewardClaimed: Boolean = false,
-    val dailyRewardStreakDay: Int = 1
+    val dailyRewardStreakDay: Int = 1,
+    val selectedChallengeLevel: Int = 1,
+    val isGameWon: Boolean = false,
+    val wonChallengeLevel: ChallengeLevel? = null,
+    val wonStars: Int = 3,
+    val showSecondChanceDialog: Boolean = false,
+    val reviveUsedThisGame: Boolean = false,
+    val rewardsDoubled: Boolean = false
 )
 
 class GameViewModel(application: Application) : AndroidViewModel(application) {
@@ -182,12 +189,57 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             isPaused = false,
             showPerfectClearBanner = false,
             showShareDialog = false,
+            isGameWon = false,
+            wonChallengeLevel = null,
+            showSecondChanceDialog = false,
+            reviveUsedThisGame = false,
+            rewardsDoubled = false,
             smartHint = null,
             nearMissRows = emptySet(),
             nearMissCols = emptySet()
         )
 
         startModeTimer(mode)
+        resetIdleHintTimer()
+    }
+
+    fun startChallengeLevel(levelNumber: Int) {
+        audioManager.playClick()
+        hapticsManager.vibrateMedium()
+        gameStartTime = System.currentTimeMillis()
+        engine = GameEngine(GameMode.CHALLENGE, repository.getHighScore(GameMode.CHALLENGE))
+
+        _uiState.value = _uiState.value.copy(
+            currentScreen = AppScreen.GAME,
+            gameMode = GameMode.CHALLENGE,
+            selectedChallengeLevel = levelNumber,
+            grid = copyGrid(engine.grid),
+            availablePieces = engine.availablePieces.toList(),
+            score = 0,
+            highScore = engine.highScore,
+            isNewHighScore = false,
+            combo = 0,
+            linesClearedTotal = 0,
+            blocksPlacedTotal = 0,
+            overdriveMeter = 0f,
+            isOverdriveActive = false,
+            activeEvent = null,
+            timeAttackSeconds = 60,
+            duelAiScore = 0,
+            isGameOver = false,
+            isPaused = false,
+            showPerfectClearBanner = false,
+            showShareDialog = false,
+            isGameWon = false,
+            wonChallengeLevel = null,
+            showSecondChanceDialog = false,
+            reviveUsedThisGame = false,
+            rewardsDoubled = false,
+            smartHint = null,
+            nearMissRows = emptySet(),
+            nearMissCols = emptySet()
+        )
+
         resetIdleHintTimer()
     }
 
@@ -356,6 +408,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     smartHint = null
                 )
 
+                // Check victory conditions
+                if (_uiState.value.gameMode == GameMode.CHALLENGE && !_uiState.value.isGameWon) {
+                    val lvl = _uiState.value.challenges.find { it.levelNumber == _uiState.value.selectedChallengeLevel }
+                    if (lvl != null) {
+                        val isWon = when {
+                            lvl.targetDescription.contains("points") -> engine.score >= lvl.targetScore
+                            lvl.targetDescription.contains("combos") -> engine.linesClearedTotal >= lvl.targetLines && engine.highestCombo >= lvl.targetCombos
+                            else -> engine.linesClearedTotal >= lvl.targetLines
+                        }
+                        if (isWon) {
+                            handleVictory(lvl)
+                            _dragState.value = DragState()
+                            return
+                        }
+                    }
+                } else if (_uiState.value.gameMode == GameMode.DUEL && !_uiState.value.isGameWon) {
+                    if (engine.score >= 2000 && engine.score > engine.duelAiScore + 400) {
+                        handleVictory(null)
+                        _dragState.value = DragState()
+                        return
+                    }
+                }
+
                 if (result.isGameOver) {
                     handleGameOver()
                 } else {
@@ -420,8 +495,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             repository.recordTimeAttackGame()
         }
 
+        val canRevive = !_uiState.value.reviveUsedThisGame && engine.score >= 50
+
         _uiState.value = _uiState.value.copy(
             isGameOver = true,
+            showSecondChanceDialog = canRevive,
             isNewHighScore = isNewRecord,
             earnedCoins = coinsGain,
             earnedXp = xpGain,
@@ -430,6 +508,102 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             stats = repository.getStats(),
             achievements = repository.getAchievements()
         )
+    }
+
+    /**
+     * Revives the game by clearing board area and restocking pieces.
+     * Rewarded ad mechanic for loss state recovery.
+     */
+    fun reviveGame() {
+        val cleared = engine.revive()
+        audioManager.playReward()
+        hapticsManager.vibrateCelebration()
+        vfxManager.triggerFlash(Color(0xFF00F0FF), 0.5f)
+        vfxManager.spawnFloatingText("REVIVED!", 400f, 600f, Color(0xFF06D6A0), 2f)
+
+        _uiState.value = _uiState.value.copy(
+            isGameOver = false,
+            showSecondChanceDialog = false,
+            reviveUsedThisGame = true,
+            grid = copyGrid(engine.grid),
+            availablePieces = engine.availablePieces.toList()
+        )
+        resetIdleHintTimer()
+    }
+
+    fun dismissSecondChance() {
+        _uiState.value = _uiState.value.copy(showSecondChanceDialog = false)
+    }
+
+    /**
+     * Doubles the coins and XP earned from this game session via Rewarded Ad.
+     */
+    fun doubleCoinsReward() {
+        if (_uiState.value.rewardsDoubled) return
+        val bonusCoins = _uiState.value.earnedCoins
+        val bonusXp = _uiState.value.earnedXp
+        val (updatedProfile, leveledUp) = repository.addXpAndCoins(bonusXp, bonusCoins)
+        audioManager.playReward()
+        hapticsManager.vibrateCelebration()
+        _uiState.value = _uiState.value.copy(
+            rewardsDoubled = true,
+            earnedCoins = _uiState.value.earnedCoins * 2,
+            earnedXp = _uiState.value.earnedXp * 2,
+            profile = updatedProfile,
+            showLevelUpDialog = leveledUp || _uiState.value.showLevelUpDialog
+        )
+    }
+
+    /**
+     * Handles victory state (Sector puzzle cleared or Duel AI defeated).
+     */
+    fun handleVictory(level: ChallengeLevel? = null) {
+        timerJob?.cancel()
+        idleHintJob?.cancel()
+        audioManager.playReward()
+        hapticsManager.vibrateCelebration()
+        vfxManager.spawnConfetti(500f, 600f, 200)
+
+        val stars = when {
+            engine.linesClearedTotal >= (level?.targetLines ?: 10) + 4 -> 3
+            engine.linesClearedTotal >= (level?.targetLines ?: 10) + 2 -> 2
+            else -> 1
+        }
+
+        if (level != null) {
+            repository.saveChallengeStars(level.levelNumber, stars)
+        }
+
+        val xpGain = 250 * stars
+        val coinsGain = 180 * stars
+        val (updatedProfile, leveledUp) = repository.addXpAndCoins(xpGain, coinsGain)
+
+        _uiState.value = _uiState.value.copy(
+            isGameWon = true,
+            wonChallengeLevel = level,
+            wonStars = stars,
+            earnedCoins = coinsGain,
+            earnedXp = xpGain,
+            profile = updatedProfile,
+            showLevelUpDialog = leveledUp,
+            challenges = repository.getChallengeLevels(),
+            stats = repository.getStats(),
+            achievements = repository.getAchievements()
+        )
+    }
+
+    fun dismissVictory() {
+        _uiState.value = _uiState.value.copy(isGameWon = false)
+    }
+
+    fun onVictoryProceed(nextLevel: Boolean = false) {
+        val currentLvl = _uiState.value.selectedChallengeLevel
+        _uiState.value = _uiState.value.copy(isGameWon = false)
+        if (nextLevel && currentLvl < 30) {
+            startChallengeLevel(currentLvl + 1)
+        } else {
+            navigateTo(AppScreen.CHALLENGES)
+        }
     }
 
     fun pauseGame() {

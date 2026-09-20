@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.ads.AdMobBanner
 import com.example.model.GameMode
 import com.example.ui.AppScreen
 import com.example.ui.GameViewModel
@@ -316,6 +317,11 @@ fun HomeScreen(viewModel: GameViewModel) {
                     Spacer(modifier = Modifier.height(24.dp))
                 }
             }
+
+            // --- ADMOB HOME BANNER AD ---
+            AdMobBanner(
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
 
             // --- BOTTOM NAVIGATION BAR ---
             HomeBottomNav(

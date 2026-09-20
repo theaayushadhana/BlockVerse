@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ads.AdsManager
 import com.example.ui.AppScreen
 import com.example.ui.GameViewModel
 import com.example.ui.screens.ChallengesScreen
@@ -28,6 +29,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        AdsManager.initialize(this)
         setContent {
             MyApplicationTheme {
                 Surface(

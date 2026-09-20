@@ -119,7 +119,7 @@ fun ChallengesScreen(viewModel: GameViewModel) {
                         level = level,
                         onClick = {
                             if (level.isUnlocked) {
-                                viewModel.startNewGame(GameMode.CHALLENGE)
+                                viewModel.startChallengeLevel(level.levelNumber)
                             }
                         }
                     )
